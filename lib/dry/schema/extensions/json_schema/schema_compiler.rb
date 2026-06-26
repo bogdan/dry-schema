@@ -76,11 +76,12 @@ module Dry
         attr_reader :keys, :required
 
         # @api private
-        def initialize(root: false, loose: false)
+        def initialize(root: false, loose: false, type_schema: nil)
           @keys = EMPTY_HASH.dup
           @required = Set.new
           @root = root
           @loose = loose
+          @type_schema = type_schema
         end
 
         # @api private
@@ -106,7 +107,12 @@ module Dry
 
         # @api private
         def visit_set(node, opts = EMPTY_HASH)
-          target = (key = opts[:key]) ? self.class.new(loose: loose?) : self
+          if (key = opts[:key])
+            nested_ts = child_type_schema(key, opts[:member])
+            target = self.class.new(loose: loose?, type_schema: nested_ts)
+          else
+            target = self
+          end
 
           node.map { |child| target.visit(child, opts.except(:member)) }
 
@@ -173,6 +179,18 @@ module Dry
           end
 
           visit(rest, opts.merge(key: name))
+
+          if @type_schema
+            begin
+              key_type = @type_schema.key(name)
+              type_meta = key_type.meta[:json_schema]
+              keys[name].merge!(type_meta) if type_meta
+              default = extract_default(key_type)
+              keys[name][:default] = default unless default.equal?(Dry::Core::Constants::Undefined)
+            rescue KeyError
+              # key not found in type_schema, skip
+            end
+          end
         end
 
         # @api private
@@ -294,6 +312,29 @@ module Dry
         # @api private
         def loose?
           @loose
+        end
+
+        def extract_default(type)
+          t = type
+          while t
+            return t.value if t.is_a?(Dry::Types::Default)
+
+            t = t.respond_to?(:type) ? t.type : nil
+          end
+          Dry::Core::Constants::Undefined
+        end
+
+        def child_type_schema(key, member)
+          return unless @type_schema.respond_to?(:key)
+
+          key_type = @type_schema.key(key).type
+          return key_type unless member
+
+          # For arrays: unwrap Lax -> Array::Member -> member (the element hash schema)
+          inner = key_type.respond_to?(:type) ? key_type.type : key_type
+          inner.respond_to?(:member) ? inner.member : nil
+        rescue KeyError
+          nil
         end
 
         def raise_unknown_conversion_error!(type, name)

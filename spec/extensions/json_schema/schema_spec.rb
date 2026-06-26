@@ -532,4 +532,164 @@ RSpec.describe Dry::Schema::JSON, "#json_schema" do
       end
     end
   end
+
+  context "when a type has json_schema meta" do
+    let(:schema) do
+      Dry::Schema.JSON do
+        required(:email).filled(
+          Dry::Types["string"].meta(json_schema: {description: "Email address", example: "a@b.com"})
+        )
+        optional(:age).filled(
+          Dry::Types["integer"].meta(json_schema: {description: "Age in years"})
+        )
+        required(:name).filled(:string)
+      end
+    end
+
+    include_examples "metaschema validation"
+
+    it "merges json_schema meta into property output" do
+      result = schema.json_schema
+      expect(result[:properties][:email]).to include(description: "Email address", example: "a@b.com")
+      expect(result[:properties][:age]).to include(description: "Age in years")
+      expect(result[:properties][:name]).to eq({type: "string", minLength: 1})
+    end
+
+    context "with nested hash" do
+      let(:schema) do
+        Dry::Schema.JSON do
+          required(:address).hash do
+            required(:street).filled(
+              Dry::Types["string"].meta(json_schema: {description: "Street name"})
+            )
+          end
+        end
+      end
+
+      include_examples "metaschema validation"
+
+      it "merges json_schema meta into nested property output" do
+        result = schema.json_schema
+        expect(result[:properties][:address][:properties][:street]).to include(description: "Street name")
+      end
+    end
+
+    context "with array of hashes" do
+      let(:schema) do
+        Dry::Schema.JSON do
+          required(:roles).array(:hash) do
+            required(:name).filled(
+              Dry::Types["string"].meta(json_schema: {description: "Role name"})
+            )
+          end
+        end
+      end
+
+      include_examples "metaschema validation"
+
+      it "merges json_schema meta into array member property output" do
+        result = schema.json_schema
+        expect(result[:properties][:roles][:items][:properties][:name]).to include(description: "Role name")
+      end
+    end
+  end
+
+  context "when a type has a dry-types default value" do
+    it "auto-populates default in the json schema output" do
+      schema = Dry::Schema.JSON do
+        required(:role).value(Dry::Types["string"].default("user".freeze))
+        required(:count).value(Dry::Types["integer"].default(0))
+        required(:name).filled(:string)
+      end
+
+      result = schema.json_schema
+      expect(result[:properties][:role]).to include(default: "user")
+      expect(result[:properties][:count]).to include(default: 0)
+      expect(result[:properties][:name]).not_to have_key(:default)
+    end
+  end
+
+  context "when using .documentation chaining" do
+    let(:schema) do
+      Dry::Schema.JSON do
+        required(:email).filled(:string).documentation(description: "User email", example: "a@b.com")
+        optional(:age).filled(:integer).documentation(description: "Age in years")
+        required(:name).filled(:string)
+      end
+    end
+
+    include_examples "metaschema validation"
+
+    it "merges documentation attrs into property output" do
+      result = schema.json_schema
+      expect(result[:properties][:email]).to include(description: "User email", example: "a@b.com")
+      expect(result[:properties][:age]).to include(description: "Age in years")
+      expect(result[:properties][:name]).to eq({type: "string", minLength: 1})
+    end
+
+    it "works with value (not filled)" do
+      schema = Dry::Schema.JSON do
+        required(:code).value(:string).documentation(description: "Access code")
+      end
+      expect(schema.json_schema[:properties][:code]).to include(description: "Access code")
+    end
+
+    it "works inside nested hash" do
+      schema = Dry::Schema.JSON do
+        required(:address).hash do
+          required(:street).filled(:string).documentation(description: "Street name")
+        end
+      end
+      expect(schema.json_schema[:properties][:address][:properties][:street]).to include(description: "Street name")
+    end
+
+    it "works on a hash key itself" do
+      schema = Dry::Schema.JSON do
+        required(:address).hash do
+          required(:street).filled(:string)
+        end.documentation(description: "Mailing address")
+      end
+      expect(schema.json_schema[:properties][:address]).to include(type: "object", description: "Mailing address")
+    end
+
+    it "raises if called before a type is set" do
+      expect {
+        Dry::Schema.JSON { required(:email).documentation(description: "bad").filled(:string) }
+      }.to raise_error(Dry::Schema::InvalidSchemaError, /after a type is set/)
+    end
+
+    it "rejects :default (use dry-schema native default instead)" do
+      expect {
+        Dry::Schema.JSON do
+          required(:foo).filled(:string).documentation(default: "bar")
+        end
+      }.to raise_error(ArgumentError, /unknown keyword.*default/)
+    end
+
+    it "passes all supported keys through to the output" do
+      doc = {
+        title: "Foo",
+        description: "A foo",
+        examples: ["bar"],
+        example: "bar",
+        deprecated: true,
+      }
+      schema = Dry::Schema.JSON do
+        required(:foo).filled(:string).documentation(**doc)
+      end
+      expect(schema.json_schema[:properties][:foo]).to include(
+        type: "string",
+        minLength: 1,
+        **doc,
+      )
+    end
+
+    it "omits deprecated when false" do
+      props = Dry::Schema.JSON do
+        required(:foo).filled(:string).documentation(deprecated: false)
+      end.json_schema[:properties][:foo]
+
+      expect(props).not_to have_key(:deprecated)
+    end
+  end
 end
