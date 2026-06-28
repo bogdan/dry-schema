@@ -186,7 +186,7 @@ module Dry
               type_meta = key_type.meta[:json_schema]
               keys[name].merge!(type_meta) if type_meta
               default = extract_default(key_type)
-              keys[name][:default] = default unless default.equal?(Dry::Core::Constants::Undefined)
+              keys[name][:default] = default unless default.equal?(Undefined)
             rescue KeyError
               # key not found in type_schema, skip
             end
@@ -317,11 +317,44 @@ module Dry
         def extract_default(type)
           t = type
           while t
-            return t.value if t.is_a?(Dry::Types::Default)
+            return to_json_default(t.value) if t.is_a?(Dry::Types::Default)
 
             t = t.respond_to?(:type) ? t.type : nil
           end
-          Dry::Core::Constants::Undefined
+          Undefined
+        end
+
+        def to_json_default(value)
+          case value
+          when ::String, ::Integer, ::Float, ::TrueClass, ::FalseClass, ::NilClass
+            value
+          when ::Symbol
+            value.to_s
+          when ::BigDecimal
+            value.to_f
+          when ::Date, ::Time
+            value.iso8601
+          when ::Array
+            items = value.map { |v| to_json_default(v) }
+            return Undefined if items.any? { |v| v.equal?(Undefined) }
+
+            items
+          when ::Hash
+            result = {}
+            value.each do |k, v|
+              converted_key = to_json_default(k)
+              converted_val = to_json_default(v)
+              if converted_key.equal?(Undefined) ||
+                  converted_val.equal?(Undefined)
+                return Undefined
+              end
+
+              result[converted_key] = converted_val
+            end
+            result
+          else
+            Undefined
+          end
         end
 
         def child_type_schema(key, member)

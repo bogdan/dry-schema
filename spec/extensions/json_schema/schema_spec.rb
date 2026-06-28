@@ -595,7 +595,7 @@ RSpec.describe Dry::Schema::JSON, "#json_schema" do
   end
 
   context "when a type has a dry-types default value" do
-    it "auto-populates default in the json schema output" do
+    it "serializes primitive defaults" do
       schema = Dry::Schema.JSON do
         required(:role).value(Dry::Types["string"].default("user".freeze))
         required(:count).value(Dry::Types["integer"].default(0))
@@ -606,6 +606,69 @@ RSpec.describe Dry::Schema::JSON, "#json_schema" do
       expect(result[:properties][:role]).to include(default: "user")
       expect(result[:properties][:count]).to include(default: 0)
       expect(result[:properties][:name]).not_to have_key(:default)
+    end
+
+    it "serializes Date default as ISO 8601 string" do
+      schema = Dry::Schema.JSON do
+        required(:on).value(Dry::Types["date"].default(Date.new(2026, 6, 28).freeze))
+      end
+      expect(schema.json_schema[:properties][:on]).to include(default: "2026-06-28")
+    end
+
+    it "serializes Time default as ISO 8601 string" do
+      schema = Dry::Schema.JSON do
+        required(:at).value(Dry::Types["time"].default(Time.utc(2026, 6, 28, 10, 0, 0).freeze))
+      end
+      expect(schema.json_schema[:properties][:at]).to include(default: "2026-06-28T10:00:00Z")
+    end
+
+    it "serializes Array default recursively" do
+      schema = Dry::Schema.JSON do
+        required(:tags).value(Dry::Types["array"].default(["ruby", "rails"].freeze))
+      end
+      expect(schema.json_schema[:properties][:tags]).to include(default: ["ruby", "rails"])
+    end
+
+    it "serializes Hash default with string keys" do
+      schema = Dry::Schema.JSON do
+        required(:meta).value(Dry::Types["hash"].default({"env" => "prod"}.freeze))
+      end
+      expect(schema.json_schema[:properties][:meta]).to include(default: {"env" => "prod"})
+    end
+
+    it "serializes Symbol default as string" do
+      schema = Dry::Schema.JSON do
+        required(:tags).value(Dry::Types["array"].default([:foo, :bar].freeze))
+      end
+      expect(schema.json_schema[:properties][:tags]).to include(default: ["foo", "bar"])
+    end
+
+    it "serializes BigDecimal default as float" do
+      schema = Dry::Schema.JSON do
+        required(:amount).value(Dry::Types["decimal"].default(BigDecimal("1000")))
+      end
+      expect(schema.json_schema[:properties][:amount]).to include(default: 1000.0)
+    end
+
+    it "omits default when a hash value is not JSON-serializable" do
+      schema = Dry::Schema.JSON do
+        required(:thing).value(Dry::Types["any"].default(Object.new.freeze))
+      end
+      expect(schema.json_schema[:properties][:thing]).not_to have_key(:default)
+    end
+
+    it "converts symbol hash keys to strings" do
+      schema = Dry::Schema.JSON do
+        required(:meta).value(Dry::Types["hash"].default({env: "prod", count: 1}.freeze))
+      end
+      expect(schema.json_schema[:properties][:meta]).to include(default: {"env" => "prod", "count" => 1})
+    end
+
+    it "omits default when a hash key is not JSON-serializable" do
+      schema = Dry::Schema.JSON do
+        required(:meta).value(Dry::Types["hash"].default({Object.new => "bad"}.freeze))
+      end
+      expect(schema.json_schema[:properties][:meta]).not_to have_key(:default)
     end
   end
 
