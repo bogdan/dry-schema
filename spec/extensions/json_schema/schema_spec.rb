@@ -754,5 +754,19 @@ RSpec.describe Dry::Schema::JSON, "#json_schema" do
 
       expect(props).not_to have_key(:deprecated)
     end
+
+    it "serializes example: Date to iso8601 string" do
+      schema = Dry::Schema.JSON do
+        required(:foo).filled(:date).documentation(example: ::Date.new(2024, 1, 15))
+      end
+      expect(schema.json_schema[:properties][:foo][:example]).to eq("2024-01-15")
+    end
+
+    it "serializes examples: [Date] elements to iso8601 strings" do
+      schema = Dry::Schema.JSON do
+        required(:foo).filled(:date).documentation(examples: [::Date.new(2024, 1, 1), ::Date.new(2024, 6, 30)])
+      end
+      expect(schema.json_schema[:properties][:foo][:examples]).to eq(["2024-01-01", "2024-06-30"])
+    end
   end
 end

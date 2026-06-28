@@ -184,7 +184,12 @@ module Dry
             begin
               key_type = @type_schema.key(name)
               type_meta = key_type.meta[:json_schema]
-              keys[name].merge!(type_meta) if type_meta
+              if type_meta
+                sanitized = type_meta.dup
+                sanitized[:example] = serialize_json_value(sanitized[:example]) if sanitized.key?(:example)
+                sanitized[:examples] = sanitized[:examples]&.map { |v| serialize_json_value(v) } if sanitized.key?(:examples)
+                keys[name].merge!(sanitized)
+              end
               default = extract_default(key_type)
               keys[name][:default] = default unless default.equal?(Undefined)
             rescue KeyError
@@ -317,14 +322,14 @@ module Dry
         def extract_default(type)
           t = type
           while t
-            return to_json_default(t.value) if t.is_a?(Dry::Types::Default)
+            return serialize_json_value(t.value) if t.is_a?(Dry::Types::Default)
 
             t = t.respond_to?(:type) ? t.type : nil
           end
           Undefined
         end
 
-        def to_json_default(value)
+        def serialize_json_value(value)
           case value
           when ::String, ::Integer, ::Float, ::TrueClass, ::FalseClass, ::NilClass
             value
@@ -335,15 +340,15 @@ module Dry
           when ::Date, ::Time
             value.iso8601
           when ::Array
-            items = value.map { |v| to_json_default(v) }
+            items = value.map { |v| serialize_json_value(v) }
             return Undefined if items.any? { |v| v.equal?(Undefined) }
 
             items
           when ::Hash
             result = {}
             value.each do |k, v|
-              converted_key = to_json_default(k)
-              converted_val = to_json_default(v)
+              converted_key = serialize_json_value(k)
+              converted_val = serialize_json_value(v)
               if converted_key.equal?(Undefined) ||
                   converted_val.equal?(Undefined)
                 return Undefined
